@@ -1,4 +1,9 @@
 import { useState, useEffect } from 'react';
+import { Routes, Route } from 'react-router-dom';
+import Swal from 'sweetalert2';
+import { db, isFirebaseConfigured } from './firebase';
+import { collection, getDocs, doc, setDoc, increment, updateDoc } from 'firebase/firestore';
+import AdminPage from './AdminPage';
 import { 
   ShoppingCart, 
   ShoppingBag, 
@@ -41,189 +46,35 @@ const InstagramIcon = ({ size = 24, className }) => (
   </svg>
 );
 
-const PRODUCTS = [
-  {
-    id: 1,
-    name: "Jabón Líquido Premium para Ropa",
-    category: "hogar",
-    price: 2800,
-    volume: "5 Litros",
-    rating: 4.8,
-    reviews: 124,
-    badge: "Más Vendido",
-    image: "/category_home.jpg",
-    description: "Fórmula concentrada de lavado profundo con enzimas activas. Elimina las manchas más difíciles dejando una fragancia floral duradera que perdura semanas. Protege los colores de las prendas y es apto para lavarropas automáticos y lavado a mano.",
-    usage: "Diluir 100ml de jabón líquido por cada carga completa de lavarropas (aproximadamente 5-6 kg de ropa). Para manchas rebeldes, aplicar directamente sobre la tela antes del lavado.",
-    safety: "Mantener fuera del alcance de niños y mascotas. En caso de contacto con los ojos, enjuagar con abundante agua. No ingerir."
-  },
-  {
-    id: 2,
-    name: "Suavizante de Telas 'Caricias de Algodón'",
-    category: "hogar",
-    price: 2600,
-    volume: "5 Litros",
-    rating: 4.7,
-    reviews: 98,
-    badge: "Eco-friendly",
-    image: "/category_home.jpg",
-    description: "Acondiciona las fibras de tus prendas otorgando una suavidad excepcional al tacto. Su fórmula anti-estática facilita el planchado y previene la formación de pelotitas en la ropa. Aromatizado con notas florales suaves.",
-    usage: "Agregar 80ml de suavizante en el compartimiento correspondiente del lavarropas en el último ciclo de enjuague. No verter directamente sobre las telas.",
-    safety: "No mezclar con otros productos de lavado. Conservar en lugar fresco y seco."
-  },
-  {
-    id: 3,
-    name: "Desengrasante Multiuso Ultra Concentrado",
-    category: "hogar",
-    price: 1800,
-    volume: "1 Litro",
-    rating: 4.9,
-    reviews: 156,
-    badge: "Fórmula Activa",
-    image: "/category_combos.jpg",
-    description: "Remueve de forma instantánea la grasa, el aceite y la suciedad más adherida en cocinas, campanas, parrillas y superficies lavables. Su acción desengrasante disuelve los depósitos grasos en segundos sin dañar metales ni cerámicos.",
-    usage: "Para limpieza pesada, usar puro o diluido 1:1 con agua. Para superficies generales, diluir 100ml en 1 litro de agua y aplicar con rociador o esponja.",
-    safety: "Utilizar guantes durante su uso. Evitar el contacto con piel y ojos. Usar en ambientes ventilados."
-  },
-  {
-    id: 4,
-    name: "Detergente Vajilla Activo Limón",
-    category: "hogar",
-    price: 1200,
-    volume: "1 Litro",
-    rating: 4.6,
-    reviews: 75,
-    badge: "Mayor Espuma",
-    image: "/category_combos.jpg",
-    description: "Detergente de vajilla de alto rendimiento con pH neutro para el cuidado de tus manos. Su poder antigrasa con extracto natural de limón corta la suciedad en ollas, platos y cubiertos, dejando un brillo impecable libre de aureolas.",
-    usage: "Verter unas gotas directamente sobre la esponja previamente humedecida. Frotar y enjuagar con abundante agua.",
-    safety: "En caso de ingestión accidental, beber abundante agua y consultar al médico."
-  },
-  {
-    id: 5,
-    name: "Shampoo Automotriz Siliconado con Cera",
-    category: "automotriz",
-    price: 3200,
-    volume: "5 Litros",
-    rating: 4.9,
-    reviews: 142,
-    badge: "Brillo Extremo",
-    image: "/category_car.jpg",
-    description: "Shampoo neutro diseñado especialmente para la limpieza de carrocerías. Contiene polímeros de silicona y ceras naturales que remueven la suciedad, hollín y grasitud del camino, dejando una capa protectora repelente al agua y al polvo con un acabado brillante de showroom.",
-    usage: "Diluir 50ml en un balde con 5 litros de agua limpia. Generar espuma e ir lavando la carrocería de arriba hacia abajo con microfibra o guante de lavado. Luego enjuagar.",
-    safety: "No lavar el auto bajo el sol directo o si la chapa está caliente. Evitar que se seque el producto en la superficie."
-  },
-  {
-    id: 6,
-    name: "Revividor de Plásticos y Gomas Premium",
-    category: "automotriz",
-    price: 2500,
-    volume: "1 Litro",
-    rating: 4.8,
-    reviews: 110,
-    badge: "Protección UV",
-    image: "/category_car.jpg",
-    description: "Restaura el color original y la elasticidad de los plásticos exteriores expuestos, gomas, burletes y neumáticos de tu vehículo. Su capa protectora con filtros UV previene el resecamiento, agrietamiento y decoloración causados por el sol.",
-    usage: "Limpiar y secar la superficie a tratar. Aplicar una pequeña cantidad en un aplicador de espuma o microfibra y esparcir de forma uniforme. Retirar excesos con microfibra limpia.",
-    safety: "No aplicar en pedales, volante, discos de freno o superficies donde el deslizamiento pueda ser peligroso."
-  },
-  {
-    id: 7,
-    name: "Silicona Líquida Perfumada Interiores",
-    category: "automotriz",
-    price: 2900,
-    volume: "1 Litro",
-    rating: 4.7,
-    reviews: 89,
-    badge: "Fragancia Premium",
-    image: "/category_car.jpg",
-    description: "Acondicionador de interiores para tableros, paneles de puerta y molduras plásticas. Otorga un brillo satinado elegante sin dejar sensación grasosa o pegajosa, repele el polvo y deja un perfume agradable de larga duración.",
-    usage: "Rociar sobre una microfibra limpia y frotar suavemente sobre el tablero u otras zonas plásticas interiores.",
-    safety: "Evitar rociar directamente sobre vidrios o pantallas multimedia."
-  },
-  {
-    id: 8,
-    name: "Cloro Líquido Concentrado Estabilizado",
-    category: "piscinas",
-    price: 3400,
-    volume: "5 Litros",
-    rating: 4.8,
-    reviews: 115,
-    badge: "Cloro Puro",
-    image: "/category_pool.jpg",
-    description: "Desinfectante bactericida y alguicida de disolución rápida para todo tipo de piscinas. Su alta pureza asegura la eliminación inmediata de bacterias, hongos y microorganismos suspendidos en el agua, manteniéndola saludable.",
-    usage: "Agregar 1 litro de cloro líquido por cada 20.000 litros de agua diariamente al atardecer o cuando la piscina no esté en uso. Ajustar según el nivel de cloro libre residual (1-3 ppm).",
-    safety: "Corrosivo. Utilizar protección ocular y guantes al manipular. No mezclar con ácidos u otros productos químicos. Tóxico para organismos acuáticos si se usa en exceso."
-  },
-  {
-    id: 9,
-    name: "Clarificador de Agua Rápida Acción",
-    category: "piscinas",
-    price: 2200,
-    volume: "1 Litro",
-    rating: 4.6,
-    reviews: 67,
-    badge: "Acción Rápida",
-    image: "/category_pool.jpg",
-    description: "Coagulante y floculante que agrupa las partículas microscópicas de suciedad en suspensión, haciéndolas decantar al fondo de la piscina para ser fácilmente removidas por el barrefondo. Logra un agua cristalina.",
-    usage: "Verter 250ml por cada 50.000 litros de agua, diluido previamente en un balde. Encender el filtro en modo recirculación por 1-2 horas y luego dejar reposar toda la noche. Pasar el barrefondo por la mañana.",
-    safety: "Evitar el contacto directo con el producto concentrado. No nadar durante el proceso de decantación."
-  },
-  {
-    id: 10,
-    name: "Alguicida Preventivo Concentrado",
-    category: "piscinas",
-    price: 2400,
-    volume: "1 Litro",
-    rating: 4.7,
-    reviews: 80,
-    badge: "Fórmula Concentrada",
-    image: "/category_pool.jpg",
-    description: "Fórmula eficaz contra todo tipo de algas, previniendo la formación de agua verde y superficies resbaladizas en las paredes de la piscina. No mancha revestimientos y es apto para piscinas de fibra y lona.",
-    usage: "Dosis de mantenimiento: agregar 100ml por cada 10.000 litros de agua una vez a la semana. Dosis de shock (presencia de algas): agregar 200ml por cada 10.000 litros.",
-    safety: "No ingerir. Mantener alejado de alimentos y bebidas."
-  },
-  {
-    id: 11,
-    name: "Kit Limpieza Hogar Completo",
-    category: "combos",
-    price: 6500,
-    volume: "Pack Ahorro",
-    rating: 4.9,
-    reviews: 210,
-    badge: "15% OFF",
-    image: "/category_home.jpg",
-    description: "El combo definitivo para mantener tu hogar impecable y aromatizado. Ahorrá comprando los productos esenciales juntos. Incluye: 1 Jabón Líquido Ropa 5L, 1 Suavizante Algodón 5L, 1 Desengrasante Concentrado 1L y 1 Detergente Limón 1L.",
-    usage: "Ver especificaciones de cada producto incluido para su correcta aplicación.",
-    safety: "Almacenar de forma segura en sus envases originales debidamente cerrados."
-  },
-  {
-    id: 12,
-    name: "Kit Brillo Automotriz Extremo",
-    category: "combos",
-    price: 7200,
-    volume: "Pack Detailing",
-    rating: 5.0,
-    reviews: 185,
-    badge: "20% OFF",
-    image: "/category_combos.jpg",
-    description: "Llevá el cuidado de tu vehículo al siguiente nivel con este kit de detailing. Lográ una limpieza profunda, un brillo deslumbrante y una protección duradera tanto para el interior como el exterior. Incluye: 1 Shampoo Siliconado 5L, 1 Revividor de Plásticos 1L, 1 Silicona Perfumada 1L y 1 Paño de microfibra premium de regalo.",
-    usage: "Ver instrucciones en cada envase. Utilizar la microfibra limpia para retirar excedentes de brillo y abrillantar.",
-    safety: "Manipular con cuidado. Lavarse las manos luego del uso."
-  }
-];
+const WhatsAppIcon = ({ size = 24 }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="currentColor"
+  >
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/>
+  </svg>
+);
+
+
 
 function App() {
+  const [products, setProducts] = useState([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('todos');
   const [sortBy, setSortBy] = useState('popular');
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [activeTab, setActiveTab] = useState('description');
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  
+  // Quantity selector state for product cards
+  const [productQuantities, setProductQuantities] = useState({});
   const [checkoutForm, setCheckoutForm] = useState({
     name: '',
-    address: '',
     phone: '',
     delivery: 'retiro',
     payment: 'efectivo'
@@ -236,13 +87,61 @@ function App() {
   const [contactStatus, setContactStatus] = useState(null);
   const [activeSection, setActiveSection] = useState('home');
 
+  // Firebase Admin states
+
+
+
+  // Fetch products from Firebase Firestore
+  const fetchProductsFromFirebase = async () => {
+    if (!isFirebaseConfigured || !db) return;
+    setIsLoadingProducts(true);
+    try {
+      const querySnapshot = await getDocs(collection(db, "productos"));
+      const loadedProducts = [];
+      querySnapshot.forEach((doc) => {
+        loadedProducts.push({ id: doc.id, ...doc.data() });
+      });
+      if (loadedProducts.length > 0) {
+        setProducts(loadedProducts);
+      }
+    } catch (error) {
+      console.error("Error fetching products from Firestore:", error);
+      console.error("Error");
+    } finally {
+      setIsLoadingProducts(false);
+    }
+  };
+
+
+  // Fetch products on mount
+  useEffect(() => {
+    if (isFirebaseConfigured) {
+      fetchProductsFromFirebase();
+      
+      // Track visitor
+      if (!sessionStorage.getItem('hf_visited')) {
+        const trackVisitor = async () => {
+          try {
+            const visitorRef = doc(db, 'analytics', 'visitors');
+            await setDoc(visitorRef, { count: increment(1) }, { merge: true });
+            sessionStorage.setItem('hf_visited', 'true');
+          } catch (e) {
+             console.error("Error tracking visitor", e);
+          }
+        };
+        trackVisitor();
+      }
+    }
+  }, []);
+
+
   // Intersection Observer to track scroll position and update active section highlight
   useEffect(() => {
     const sections = ['home', 'productos', 'nosotros', 'contacto'];
     
     const observerOptions = {
       root: null,
-      rootMargin: '-30% 0px -50% 0px', // Trigger when section occupies screen center
+      rootMargin: '-30% 0px -50% 0px',
       threshold: 0.1
     };
 
@@ -285,21 +184,51 @@ function App() {
     localStorage.setItem('hf_quimica_cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Cart operations
-  const addToCart = (product) => {
+  // Get quantity for a product in the card selector
+  const getProductQty = (productId) => productQuantities[productId] || 1;
+
+  const setProductQty = (productId, qty) => {
+    const parsed = parseInt(qty, 10);
+    const val = isNaN(parsed) ? 1 : Math.max(1, parsed);
+    setProductQuantities(prev => ({ ...prev, [productId]: val }));
+  };
+
+  const incrementProductQty = (productId) => {
+    setProductQuantities(prev => ({ ...prev, [productId]: (prev[productId] || 1) + 1 }));
+  };
+
+  const decrementProductQty = (productId) => {
+    setProductQuantities(prev => ({
+      ...prev,
+      [productId]: Math.max(1, (prev[productId] || 1) - 1)
+    }));
+  };
+
+  // Cart operations — do NOT auto-open cart on add
+  const addToCart = (product, quantity = 1) => {
     setCart((prevCart) => {
       const existingItem = prevCart.find((item) => item.product.id === product.id);
       if (existingItem) {
         return prevCart.map((item) => 
           item.product.id === product.id 
-            ? { ...item, quantity: item.quantity + 1 } 
+            ? { ...item, quantity: item.quantity + quantity } 
             : item
         );
       }
-      return [...prevCart, { product, quantity: 1 }];
+      return [...prevCart, { product, quantity }];
     });
-    // Open cart drawer on add
-    setIsCartOpen(true);
+
+    Swal.fire({
+      icon: 'success',
+      title: 'Agregado al carrito',
+      text: `${quantity}x ${product.name}`,
+      toast: true,
+      position: 'bottom-end',
+      showConfirmButton: false,
+      timer: 3000,
+      background: '#16213e',
+      color: '#fff'
+    });
   };
 
   const updateQuantity = (productId, amount) => {
@@ -311,6 +240,16 @@ function App() {
         }
         return item;
       })
+    );
+  };
+
+  const updateCartItemQuantityDirect = (productId, value) => {
+    const parsed = parseInt(value, 10);
+    if (isNaN(parsed) || parsed < 1) return;
+    setCart((prevCart) => 
+      prevCart.map((item) => 
+        item.product.id === productId ? { ...item, quantity: parsed } : item
+      )
     );
   };
 
@@ -326,7 +265,7 @@ function App() {
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   // Filter & Sort products
-  const filteredProducts = PRODUCTS.filter((p) => {
+  const filteredProducts = products.filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           p.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = selectedCategory === 'todos' || p.category === selectedCategory;
@@ -364,7 +303,6 @@ function App() {
   const handleCheckoutSubmit = (e) => {
     e.preventDefault();
     
-    // Format message for WhatsApp
     const orderItems = cart.map(
       (item) => `• *${item.product.name}* [${item.product.volume}] (Cant: ${item.quantity}) - $${(item.product.price * item.quantity).toLocaleString('es-AR')}`
     ).join('\n');
@@ -374,26 +312,21 @@ function App() {
     const message = `*HF QUÍMICA - NUEVO PEDIDO*\n\n` +
       `👤 *Cliente:* ${checkoutForm.name}\n` +
       `📞 *Teléfono:* ${checkoutForm.phone}\n` +
-      `📍 *Dirección de Entrega:* ${checkoutForm.address}\n` +
-      `🚚 *Método:* ${checkoutForm.delivery === 'envio' ? 'Envío a Domicilio' : 'Retiro por local'}\n` +
+      `🚚 *Método:* ${checkoutForm.delivery === 'envio' ? 'Envío a Domicilio' : 'Retiro / Punto de encuentro'}\n` +
       `💳 *Forma de Pago:* ${checkoutForm.payment === 'efectivo' ? 'Efectivo / Transferencia' : 'Tarjeta de Débito/Crédito'}\n\n` +
       `🛒 *Detalle del Pedido:*\n${orderItems}\n\n` +
       `💵 *TOTAL:* *$${formattedTotal}*\n\n` +
       `¡Muchas gracias! Aguardo la confirmación de la cotización.`;
       
     const encodedMessage = encodeURIComponent(message);
-    // WhatsApp URL using the handle's phone number or template
-    // Target country code 549 (Argentina)
-    const phoneNumber = "5491123456789"; // Placeholder HF Química commercial whatsapp
+    const phoneNumber = "5491144006282";
     const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
     
     window.open(whatsappUrl, '_blank');
     
-    // Clear cart and close modals
     clearCart();
     setIsCheckoutOpen(false);
     setIsCartOpen(false);
-    alert('¡Tu pedido ha sido preparado! Serás redirigido a WhatsApp para finalizar la coordinación con HF Química.');
   };
 
   // Scroll to section helper
@@ -405,7 +338,17 @@ function App() {
     }
   };
 
+  const openWhatsApp = () => {
+    const phoneNumber = "5491144006282";
+    const message = encodeURIComponent("Hola! Me comunico desde la web de HF Química, me gustaría hacer una consulta.");
+    window.open(`https://wa.me/${phoneNumber}?text=${message}`, '_blank');
+  };
+
+
   return (
+    <Routes>
+      <Route path="/gestion" element={<AdminPage />} />
+      <Route path="*" element={
     <div className="app-container">
       {/* Decorative Bubbles for premium aesthetic */}
       <div className="bubbles-decorator">
@@ -415,6 +358,16 @@ function App() {
         <div className="bubble" style={{ left: '92%', width: '20px', height: '20px', animationDelay: '1s', bottom: '8%' }}></div>
       </div>
 
+      {/* --- FLOATING WHATSAPP BUTTON --- */}
+      <button
+        className="whatsapp-fab"
+        onClick={openWhatsApp}
+        aria-label="Contactar por WhatsApp"
+        title="Contactar por WhatsApp"
+      >
+        <WhatsAppIcon size={28} />
+      </button>
+
       {/* --- HEADER --- */}
       <header>
         <div className="container header-inner">
@@ -422,7 +375,7 @@ function App() {
             <img src="/logo.jpeg" className="logo-img" alt="HF Química Logo" />
             <div className="logo-text">
               <span>HF Química</span>
-              <span className="logo-slogan">Limpieza & Calidad</span>
+              <span className="logo-slogan">Limpieza &amp; Calidad</span>
             </div>
           </a>
 
@@ -464,7 +417,7 @@ function App() {
             <span className="hero-tag">🌟 Fabricación Local</span>
             <h1 className="hero-title">Limpieza que se ve, Calidad que se siente</h1>
             <p className="hero-desc">
-              Descubrí nuestra amplia gama de productos químicos y de limpieza ultra concentrados. Desarrollados con fórmulas de alto rendimiento para el hogar, tu vehículo y piscinas.
+              Descubrí nuestra amplia gama de productos de limpieza ultra concentrados para el hogar, piletas, textil e higiene. Entregas en Buenos Aires y envíos a todo el país.
             </p>
             <div className="hero-buttons">
               <button className="btn btn-primary" onClick={() => scrollToSection('productos')}>
@@ -477,7 +430,14 @@ function App() {
           </div>
           <div className="hero-image-wrapper">
             <div className="hero-image-card">
-              <img src="/hero_cleaner.jpg" alt="HF Química Lab Quality Products" />
+              <video
+                src="/3B2E5F33-7FAE-4F7D-BEDB-81F4CD501453.mov"
+                autoPlay
+                muted
+                loop
+                playsInline
+                style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
+              />
             </div>
           </div>
         </div>
@@ -506,8 +466,8 @@ function App() {
             <div className="info-icon-wrapper">
               <Truck size={24} />
             </div>
-            <h3 className="info-title">Envíos Rápidos</h3>
-            <p className="info-desc">Coordinamos la entrega de tu pedido a domicilio directamente por WhatsApp.</p>
+            <h3 className="info-title">Envíos a Todo el País</h3>
+            <p className="info-desc">Entregas en Buenos Aires y envíos a todo el territorio nacional.</p>
           </div>
 
           <div className="info-card">
@@ -540,19 +500,25 @@ function App() {
               className={`category-tab ${selectedCategory === 'hogar' ? 'active' : ''}`}
               onClick={() => setSelectedCategory('hogar')}
             >
-              🧴 Hogar
+              🏠 Hogar
             </button>
             <button 
-              className={`category-tab ${selectedCategory === 'automotriz' ? 'active' : ''}`}
-              onClick={() => setSelectedCategory('automotriz')}
+              className={`category-tab ${selectedCategory === 'piletas' ? 'active' : ''}`}
+              onClick={() => setSelectedCategory('piletas')}
             >
-              🚗 Automotriz
+              🏊 Piletas
             </button>
             <button 
-              className={`category-tab ${selectedCategory === 'piscinas' ? 'active' : ''}`}
-              onClick={() => setSelectedCategory('piscinas')}
+              className={`category-tab ${selectedCategory === 'textil' ? 'active' : ''}`}
+              onClick={() => setSelectedCategory('textil')}
             >
-              🏊 Piscinas
+              👕 Textil
+            </button>
+            <button 
+              className={`category-tab ${selectedCategory === 'higiene' ? 'active' : ''}`}
+              onClick={() => setSelectedCategory('higiene')}
+            >
+              🧴 Higiene
             </button>
             <button 
               className={`category-tab ${selectedCategory === 'combos' ? 'active' : ''}`}
@@ -565,7 +531,11 @@ function App() {
           {/* Toolbar sorting / counts */}
           <div className="catalog-toolbar">
             <div className="toolbar-info">
-              Mostrando <strong>{sortedProducts.length}</strong> de <strong>{PRODUCTS.length}</strong> productos
+              {isLoadingProducts ? (
+                <span>Cargando productos de Firebase...</span>
+              ) : (
+                <span>Mostrando <strong>{sortedProducts.length}</strong> de <strong>{products.length}</strong> productos</span>
+              )}
             </div>
             <div className="toolbar-controls">
               <label htmlFor="sort" className="form-label" style={{ marginBottom: 0 }}>Ordenar por:</label>
@@ -575,7 +545,7 @@ function App() {
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
               >
-                <option value="popular">Popularidad (Estrellas)</option>
+                <option value="popular">Popularidad</option>
                 <option value="price-asc">Menor precio</option>
                 <option value="price-desc">Mayor precio</option>
               </select>
@@ -583,10 +553,19 @@ function App() {
           </div>
 
           {/* Products Grid */}
-          {sortedProducts.length > 0 ? (
+          {isLoadingProducts ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+              <div className="loader" style={{ fontSize: '20px', fontWeight: '500' }}>Cargando catálogo...</div>
+            </div>
+          ) : sortedProducts.length > 0 ? (
             <div className="product-grid">
               {sortedProducts.map((product) => (
-                <article className="product-card" key={product.id}>
+                <article 
+                  className="product-card" 
+                  key={product.id}
+                  onClick={() => setSelectedProduct(product)}
+                  style={{ cursor: 'pointer' }}
+                >
                   {product.badge && <span className="product-badge">{product.badge}</span>}
                   <span className="product-volume-badge">{product.volume}</span>
                   
@@ -600,33 +579,61 @@ function App() {
                     
                     <div className="product-rating">
                       <Star size={14} fill="#f59e0b" stroke="none" />
-                      <strong>{product.rating}</strong> 
-                      <span className="product-rating-count">({product.reviews})</span>
+                      <strong>{product.rating}</strong>
                     </div>
 
                     <p className="product-desc-short">{product.description}</p>
                     
                     <button 
                       className="view-detail-link"
-                      onClick={() => { setSelectedProduct(product); setActiveTab('description'); }}
+                      onClick={(e) => { e.stopPropagation(); setSelectedProduct(product); }}
                     >
-                      Ver instrucciones y seguridad <ChevronRight size={14} />
+                      Ver detalles <ChevronRight size={14} />
                     </button>
 
                     <div className="product-footer">
                       <div className="product-price">
-                        <span className="price-label">Precio Sugerido</span>
                         <span className="price-value">${product.price.toLocaleString('es-AR')}</span>
                       </div>
                       
-                      <button 
-                        className="add-to-cart-btn"
-                        onClick={() => addToCart(product)}
-                        title="Agregar al carrito"
-                        aria-label={`Agregar ${product.name} al carrito`}
-                      >
-                        <Plus size={20} />
-                      </button>
+                      {/* Quantity selector + add to cart */}
+                      <div className="card-qty-add" onClick={(e) => e.stopPropagation()}>
+                        <div className="card-qty-control">
+                          <button
+                            className="qty-btn"
+                            onClick={() => decrementProductQty(product.id)}
+                            aria-label="Disminuir cantidad"
+                          >
+                            <Minus size={12} />
+                          </button>
+                          <input
+                            className="qty-input-inline"
+                            type="number"
+                            min="1"
+                            value={getProductQty(product.id)}
+                            onChange={(e) => setProductQty(product.id, e.target.value)}
+                            aria-label="Cantidad"
+                          />
+                          <button
+                            className="qty-btn"
+                            onClick={() => incrementProductQty(product.id)}
+                            aria-label="Aumentar cantidad"
+                          >
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                        <button 
+                          className="add-to-cart-btn"
+                          onClick={() => {
+                            addToCart(product, getProductQty(product.id));
+                            setProductQty(product.id, 1);
+                          }}
+                          title="Agregar al carrito"
+                          aria-label={`Agregar ${product.name} al carrito`}
+                        >
+                          <Plus size={16} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </article>
@@ -648,10 +655,10 @@ function App() {
             <span className="section-subtitle" style={{ alignSelf: 'flex-start' }}>Quiénes Somos</span>
             <h2 className="section-title" style={{ textAlign: 'left' }}>HF Química Profesional</h2>
             <p>
-              Nacimos con el objetivo de brindar soluciones efectivas y de calidad superior para la higiene del hogar, mantenimiento de vehículos y tratamiento de aguas. Diseñamos nuestras fórmulas bajo estrictas normas de control para garantizar el máximo rendimiento con la menor huella de residuo químico.
+              Nacimos con el objetivo de brindar soluciones efectivas y de calidad superior para la higiene del hogar, el cuidado textil y el tratamiento de piletas. Diseñamos nuestras fórmulas bajo estrictas normas de control para garantizar el máximo rendimiento con la menor huella de residuo químico.
             </p>
             <p>
-              A través de nuestro canal de distribución directo, logramos llegar a hogares, lavaderos de autos, administradores de consorcios y profesionales del mantenimiento de piscinas con precios altamente competitivos.
+              A través de nuestro canal de distribución directo, logramos llegar a hogares, lavaderos, consorcios y profesionales en todo el país con precios altamente competitivos. Realizamos entregas en Buenos Aires y envíos a todo el territorio nacional.
             </p>
             
             <div className="about-bullets">
@@ -665,7 +672,7 @@ function App() {
               <div className="bullet-item">
                 <Check className="bullet-icon" size={20} />
                 <div className="bullet-text">
-                  <h4>Asesoramiento Químico</h4>
+                  <h4>Asesoramiento Especializado</h4>
                   <p>Guiamos tu compra para que uses la dosis exacta para cada necesidad.</p>
                 </div>
               </div>
@@ -695,7 +702,7 @@ function App() {
               </div>
               <div className="contact-detail-text">
                 <h4>Teléfono / WhatsApp</h4>
-                <p>+54 9 11 2345-6789</p>
+                <p>+54 9 11 4400-6282</p>
               </div>
             </div>
 
@@ -705,7 +712,7 @@ function App() {
               </div>
               <div className="contact-detail-text">
                 <h4>Zona de Distribución</h4>
-                <p>Buenos Aires, Argentina (Envíos a coordinar)</p>
+                <p>Entregas en Buenos Aires · Envíos a todo el país</p>
               </div>
             </div>
 
@@ -804,7 +811,7 @@ function App() {
                 <span className="footer-brand-name">HF QUÍMICA</span>
               </div>
               <p className="footer-brand-desc">
-                Soluciones químicas profesionales de alta concentración y rendimiento para la higiene hogareña, automotriz y cuidado del agua de piscinas.
+                Productos de limpieza y química profesional: jabón líquido, detergente, desengrasante, lavandina, cloro para piletas, suavizante textil, blanqueador y más. Entregas en Buenos Aires y envíos a todo el país.
               </p>
             </div>
 
@@ -814,23 +821,33 @@ function App() {
                 <li className="footer-link-item"><a href="#" onClick={(e) => { e.preventDefault(); scrollToSection('home'); }}>Inicio</a></li>
                 <li className="footer-link-item"><a href="#" onClick={(e) => { e.preventDefault(); scrollToSection('productos'); }}>Catálogo de Productos</a></li>
                 <li className="footer-link-item"><a href="#" onClick={(e) => { e.preventDefault(); scrollToSection('nosotros'); }}>Sobre Nosotros</a></li>
-                <li className="footer-link-item"><a href="#" onClick={(e) => { e.preventDefault(); scrollToSection('contacto'); }}>Contacto & Consultas</a></li>
+                <li className="footer-link-item"><a href="#" onClick={(e) => { e.preventDefault(); scrollToSection('contacto'); }}>Contacto &amp; Consultas</a></li>
+
               </ul>
             </div>
 
             <div>
               <h3 className="footer-title">Contacto</h3>
               <ul className="footer-links" style={{ fontSize: '14px' }}>
-                <li>📍 Buenos Aires, Argentina</li>
-                <li>📞 +54 9 11 2345-6789</li>
-                <li>📧 info@hfquimica.com</li>
+                <li>📍 Entregas en Buenos Aires</li>
+                <li>🚚 Envíos a todo el país</li>
+                <li>📞 +54 9 11 4400-6282</li>
                 <li>⏰ Lun a Vie 9:00 - 18:00hs</li>
               </ul>
             </div>
           </div>
 
           <div className="footer-bottom">
-            <p>&copy; {new Date().getFullYear()} HF Química. Todos los derechos reservados. Desarrollado con tecnología React + Vite.</p>
+            <p>&copy; {new Date().getFullYear()} HF Química. Todos los derechos reservados. Desarrollado por{' '}
+              <a 
+                href="https://portafolio-joaquinsperatti.vercel.app/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{ textDecoration: 'underline', color: 'inherit' }}
+              >
+                JOAQUÍN SPERATTI
+              </a>.
+            </p>
             <div className="footer-payments">
               <span className="payment-badge">Efectivo</span>
               <span className="payment-badge">Transferencia</span>
@@ -873,7 +890,14 @@ function App() {
                           <button className="qty-btn" onClick={() => updateQuantity(item.product.id, -1)} aria-label="Disminuir cantidad">
                             <Minus size={12} />
                           </button>
-                          <span className="qty-value">{item.quantity}</span>
+                          <input
+                            className="qty-value qty-input-cart"
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => updateCartItemQuantityDirect(item.product.id, e.target.value)}
+                            aria-label="Cantidad"
+                          />
                           <button className="qty-btn" onClick={() => updateQuantity(item.product.id, 1)} aria-label="Aumentar cantidad">
                             <Plus size={12} />
                           </button>
@@ -905,7 +929,7 @@ function App() {
             {cart.length > 0 && (
               <div className="drawer-footer">
                 <div className="cart-summary-row">
-                  <span>Subtotal sugerido</span>
+                  <span>Subtotal</span>
                   <span>${cartTotal.toLocaleString('es-AR')}</span>
                 </div>
                 <div className="cart-summary-row" style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
@@ -951,14 +975,13 @@ function App() {
               </div>
 
               <div className="detail-info">
-                <span className="product-category-text" style={{ fontSize: '13px' }}> Límite {selectedProduct.category}</span>
+                <span className="product-category-text" style={{ fontSize: '13px' }}>{selectedProduct.category}</span>
                 <h2 className="detail-title">{selectedProduct.name}</h2>
                 
                 <div className="detail-meta">
                   <div className="product-rating" style={{ fontSize: '15px' }}>
                     <Star size={16} fill="#f59e0b" stroke="none" />
                     <strong>{selectedProduct.rating}</strong> 
-                    <span className="product-rating-count">({selectedProduct.reviews} opiniones)</span>
                   </div>
                   <span className="product-volume-badge" style={{ position: 'static' }}>Tamaño: {selectedProduct.volume}</span>
                 </div>
@@ -967,53 +990,14 @@ function App() {
                   ${selectedProduct.price.toLocaleString('es-AR')}
                 </div>
 
-                {/* Tabs */}
-                <div className="detail-tabs-header">
-                  <button 
-                    className={`detail-tab-btn ${activeTab === 'description' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('description')}
-                  >
-                    Detalles
-                  </button>
-                  <button 
-                    className={`detail-tab-btn ${activeTab === 'usage' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('usage')}
-                  >
-                    Instrucciones
-                  </button>
-                  <button 
-                    className={`detail-tab-btn ${activeTab === 'safety' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('safety')}
-                  >
-                    Seguridad ⚠️
-                  </button>
-                </div>
-
-                <div className="detail-tab-content">
-                  {activeTab === 'description' && (
-                    <p>{selectedProduct.description}</p>
-                  )}
-                  {activeTab === 'usage' && (
-                    <div>
-                      <h4 style={{ fontSize: '14px', marginBottom: '8px' }}>Modo de empleo sugerido:</h4>
-                      <p>{selectedProduct.usage}</p>
-                    </div>
-                  )}
-                  {activeTab === 'safety' && (
-                    <div className="safety-warning">
-                      <AlertTriangle size={20} className="bullet-icon" style={{ marginTop: '2px' }} />
-                      <div>
-                        <h4 style={{ fontSize: '14px', marginBottom: '4px' }}>Advertencias y Precauciones:</h4>
-                        <p>{selectedProduct.safety}</p>
-                      </div>
-                    </div>
-                  )}
+                <div className="detail-tab-content" style={{ marginTop: '12px' }}>
+                  <p>{selectedProduct.description}</p>
                 </div>
 
                 <button 
                   className="btn btn-primary" 
                   style={{ width: '100%', justifyContent: 'center', marginTop: 'auto' }}
-                  onClick={() => { addToCart(selectedProduct); setSelectedProduct(null); }}
+                  onClick={() => { addToCart(selectedProduct, 1); setSelectedProduct(null); }}
                 >
                   Agregar al Carrito <Plus size={16} />
                 </button>
@@ -1067,20 +1051,6 @@ function App() {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label" htmlFor="checkout-address">Dirección de Entrega</label>
-                  <input 
-                    type="text" 
-                    id="checkout-address" 
-                    name="address" 
-                    className="form-input" 
-                    placeholder="Ej: Av. Santa Fe 1234, CABA"
-                    value={checkoutForm.address}
-                    onChange={handleCheckoutChange}
-                    required 
-                  />
-                </div>
-
-                <div className="form-group">
                   <label className="form-label" htmlFor="checkout-delivery">Método de Distribución</label>
                   <select 
                     id="checkout-delivery" 
@@ -1090,8 +1060,8 @@ function App() {
                     value={checkoutForm.delivery}
                     onChange={handleCheckoutChange}
                   >
-                    <option value="retiro">Retiro en local / Punto de encuentro</option>
-                    <option value="envio">Envío a Domicilio (coordinar costo)</option>
+                    <option value="retiro">Retiro / Punto de encuentro (Buenos Aires)</option>
+                    <option value="envio">Envío a Domicilio — Todo el país (coordinar costo)</option>
                   </select>
                 </div>
 
@@ -1129,7 +1099,11 @@ function App() {
           </div>
         </div>
       )}
+
     </div>
+      }
+      />
+    </Routes>
   );
 }
 
