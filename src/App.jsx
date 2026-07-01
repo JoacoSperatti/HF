@@ -63,7 +63,15 @@ const WhatsAppIcon = ({ size = 24 }) => (
 function App() {
   const [products, setProducts] = useState([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(() => {
+    try {
+      const savedCart = localStorage.getItem('hf_quimica_cart');
+      return savedCart ? JSON.parse(savedCart) : [];
+    } catch (e) {
+      console.error("Error loading cart from storage", e);
+      return [];
+    }
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('todos');
   const [sortBy, setSortBy] = useState('popular');
@@ -75,9 +83,9 @@ function App() {
   const [productQuantities, setProductQuantities] = useState({});
   const [checkoutForm, setCheckoutForm] = useState({
     name: '',
-    phone: '',
+    address: '',
     delivery: 'retiro',
-    payment: 'efectivo'
+    payment: 'transferencia'
   });
   const [contactForm, setContactForm] = useState({
     name: '',
@@ -167,17 +175,7 @@ function App() {
     };
   }, []);
 
-  // Load cart from localStorage
-  useEffect(() => {
-    const savedCart = localStorage.getItem('hf_quimica_cart');
-    if (savedCart) {
-      try {
-        setCart(JSON.parse(savedCart));
-      } catch (e) {
-        console.error("Error loading cart from storage", e);
-      }
-    }
-  }, []);
+
 
   // Save cart to localStorage
   useEffect(() => {
@@ -206,36 +204,51 @@ function App() {
 
   // Cart operations — do NOT auto-open cart on add
   const addToCart = (product, quantity = 1) => {
+    if (product.stock !== undefined && product.stock <= 0) return;
+    let qtyToAdd = quantity;
     setCart((prevCart) => {
       const existingItem = prevCart.find((item) => item.product.id === product.id);
+      let newQty = qtyToAdd;
+      if (existingItem) {
+        newQty = existingItem.quantity + qtyToAdd;
+      }
+      if (product.stock !== undefined && newQty > product.stock) {
+        newQty = product.stock;
+        qtyToAdd = newQty - (existingItem ? existingItem.quantity : 0);
+      }
+      if (qtyToAdd <= 0) return prevCart;
+      
       if (existingItem) {
         return prevCart.map((item) => 
           item.product.id === product.id 
-            ? { ...item, quantity: item.quantity + quantity } 
+            ? { ...item, quantity: newQty } 
             : item
         );
       }
-      return [...prevCart, { product, quantity }];
+      return [...prevCart, { product, quantity: newQty }];
     });
 
-    Swal.fire({
-      icon: 'success',
-      title: 'Agregado al carrito',
-      text: `${quantity}x ${product.name}`,
-      toast: true,
-      position: 'bottom-end',
-      showConfirmButton: false,
-      timer: 3000,
-      background: '#16213e',
-      color: '#fff'
-    });
+    if (qtyToAdd > 0) {
+      Swal.fire({
+        icon: 'success',
+        title: 'Agregado al carrito',
+        text: `${qtyToAdd}x ${product.name}`,
+        toast: true,
+        position: 'bottom-end',
+        showConfirmButton: false,
+        timer: 3000,
+        background: '#16213e',
+        color: '#fff'
+      });
+    }
   };
 
   const updateQuantity = (productId, amount) => {
     setCart((prevCart) => 
       prevCart.map((item) => {
         if (item.product.id === productId) {
-          const newQty = item.quantity + amount;
+          let newQty = item.quantity + amount;
+          if (item.product.stock !== undefined && newQty > item.product.stock) newQty = item.product.stock;
           return newQty > 0 ? { ...item, quantity: newQty } : item;
         }
         return item;
@@ -247,9 +260,14 @@ function App() {
     const parsed = parseInt(value, 10);
     if (isNaN(parsed) || parsed < 1) return;
     setCart((prevCart) => 
-      prevCart.map((item) => 
-        item.product.id === productId ? { ...item, quantity: parsed } : item
-      )
+      prevCart.map((item) => {
+        if (item.product.id === productId) {
+           let newQty = parsed;
+           if (item.product.stock !== undefined && newQty > item.product.stock) newQty = item.product.stock;
+           return { ...item, quantity: newQty };
+        }
+        return item;
+      })
     );
   };
 
@@ -300,22 +318,45 @@ function App() {
     }, 1000);
   };
 
-  const handleCheckoutSubmit = (e) => {
+  const handleCheckoutSubmit = async (e) => {
     e.preventDefault();
     
+    // Deduct stock in Firestore
+    for (const item of cart) {
+      if (item.product.id) {
+        try {
+          const productRef = doc(db, 'productos', item.product.id);
+          await updateDoc(productRef, {
+            stock: increment(-item.quantity)
+          });
+        } catch (error) {
+          console.error("Error updating stock:", error);
+        }
+      }
+    }
+    
+    // Background refresh products after order
+    fetchProductsFromFirebase();
+
+    let orderNumber = parseInt(localStorage.getItem('hf_quimica_order_number') || '1000', 10);
+    orderNumber += 1;
+    localStorage.setItem('hf_quimica_order_number', orderNumber.toString());
+
     const orderItems = cart.map(
       (item) => `• *${item.product.name}* [${item.product.volume}] (Cant: ${item.quantity}) - $${(item.product.price * item.quantity).toLocaleString('es-AR')}`
     ).join('\n');
     
     const formattedTotal = cartTotal.toLocaleString('es-AR');
     
-    const message = `*HF QUÍMICA - NUEVO PEDIDO*\n\n` +
+    const message = `*HF QUÍMICA - NUEVO PEDIDO (#${orderNumber})*\n\n` +
       `👤 *Cliente:* ${checkoutForm.name}\n` +
-      `📞 *Teléfono:* ${checkoutForm.phone}\n` +
+      `📍 *Dirección:* ${checkoutForm.address || 'No especificada'}\n` +
       `🚚 *Método:* ${checkoutForm.delivery === 'envio' ? 'Envío a Domicilio' : 'Retiro / Punto de encuentro'}\n` +
-      `💳 *Forma de Pago:* ${checkoutForm.payment === 'efectivo' ? 'Efectivo / Transferencia' : 'Tarjeta de Débito/Crédito'}\n\n` +
+      `💳 *Forma de Pago:* ${checkoutForm.payment === 'transferencia' ? 'Transferencia Bancaria' : 'Efectivo'}\n\n` +
       `🛒 *Detalle del Pedido:*\n${orderItems}\n\n` +
       `💵 *TOTAL:* *$${formattedTotal}*\n\n` +
+      `⚠️ *Aclaración:* Para confirmar la compra mediante transferencia, enviar el comprobante de pago.\n` +
+      `*Alias:* hf.quimica.mp\n\n` +
       `¡Muchas gracias! Aguardo la confirmación de la cotización.`;
       
     const encodedMessage = encodeURIComponent(message);
@@ -347,7 +388,7 @@ function App() {
 
   return (
     <Routes>
-      <Route path="/gestion" element={<AdminPage />} />
+      <Route path="/gestion-interna" element={<AdminPage />} />
       <Route path="*" element={
     <div className="app-container">
       {/* Decorative Bubbles for premium aesthetic */}
@@ -372,7 +413,7 @@ function App() {
       <header>
         <div className="container header-inner">
           <a href="#" className="logo-container" onClick={() => scrollToSection('home')}>
-            <img src="/logo.jpeg" className="logo-img" alt="HF Química Logo" />
+            <img src="/favicon.png" className="logo-img" alt="HF Química Logo" />
             <div className="logo-text">
               <span>HF Química</span>
               <span className="logo-slogan">Limpieza &amp; Calidad</span>
@@ -567,10 +608,12 @@ function App() {
                   style={{ cursor: 'pointer' }}
                 >
                   {product.badge && <span className="product-badge">{product.badge}</span>}
+                  {(product.stock || 0) <= 0 && <span className="product-badge" style={{ backgroundColor: '#ef4444', color: 'white', top: product.badge ? '44px' : '12px' }}>Sin stock</span>}
+                  {(product.stock || 0) > 0 && (product.stock || 0) <= 5 && <span className="product-badge" style={{ backgroundColor: '#f59e0b', color: 'white', top: product.badge ? '44px' : '12px' }}>Poco stock</span>}
                   <span className="product-volume-badge">{product.volume}</span>
                   
                   <div className="product-image-container">
-                    <img src={product.image} className="product-image" alt={product.name} />
+                    <img src={product.image} className="product-image" alt={product.name} style={{ opacity: (product.stock || 0) <= 0 ? 0.5 : 1 }} />
                   </div>
                   
                   <div className="product-content">
@@ -597,12 +640,13 @@ function App() {
                       </div>
                       
                       {/* Quantity selector + add to cart */}
-                      <div className="card-qty-add" onClick={(e) => e.stopPropagation()}>
+                      <div className="card-qty-add" onClick={(e) => e.stopPropagation()} style={{ opacity: (product.stock || 0) <= 0 ? 0.5 : 1, pointerEvents: (product.stock || 0) <= 0 ? 'none' : 'auto' }}>
                         <div className="card-qty-control">
                           <button
                             className="qty-btn"
                             onClick={() => decrementProductQty(product.id)}
                             aria-label="Disminuir cantidad"
+                            disabled={(product.stock || 0) <= 0}
                           >
                             <Minus size={12} />
                           </button>
@@ -610,14 +654,23 @@ function App() {
                             className="qty-input-inline"
                             type="number"
                             min="1"
+                            max={product.stock || 999}
                             value={getProductQty(product.id)}
-                            onChange={(e) => setProductQty(product.id, e.target.value)}
+                            onChange={(e) => {
+                               let val = parseInt(e.target.value, 10);
+                               if ((product.stock || 0) >= 0 && val > (product.stock || 0)) val = (product.stock || 0);
+                               setProductQty(product.id, val);
+                            }}
                             aria-label="Cantidad"
+                            disabled={(product.stock || 0) <= 0}
                           />
                           <button
                             className="qty-btn"
-                            onClick={() => incrementProductQty(product.id)}
+                            onClick={() => {
+                               if (getProductQty(product.id) < (product.stock || 0)) incrementProductQty(product.id);
+                            }}
                             aria-label="Aumentar cantidad"
+                            disabled={(product.stock || 0) <= 0 || getProductQty(product.id) >= (product.stock || 0)}
                           >
                             <Plus size={12} />
                           </button>
@@ -625,11 +678,13 @@ function App() {
                         <button 
                           className="add-to-cart-btn"
                           onClick={() => {
+                            if ((product.stock || 0) <= 0) return;
                             addToCart(product, getProductQty(product.id));
                             setProductQty(product.id, 1);
                           }}
-                          title="Agregar al carrito"
+                          title={(product.stock || 0) <= 0 ? "Sin stock" : "Agregar al carrito"}
                           aria-label={`Agregar ${product.name} al carrito`}
+                          disabled={(product.stock || 0) <= 0}
                         >
                           <Plus size={16} />
                         </button>
@@ -679,7 +734,7 @@ function App() {
             </div>
           </div>
           <div className="about-logo-wrapper">
-            <img src="/logo.jpeg" className="about-logo-image" alt="HF Química Logo Circular" />
+            <img src="/favicon.png" className="about-logo-image" alt="HF Química Logo Circular" />
           </div>
         </div>
       </section>
@@ -807,7 +862,7 @@ function App() {
           <div className="footer-grid">
             <div className="footer-brand">
               <div className="footer-brand-logo">
-                <img src="/logo.jpeg" className="footer-brand-logo-img" alt="HF Logo Small" />
+                <img src="/favicon.png" className="footer-brand-logo-img" alt="HF Logo Small" />
                 <span className="footer-brand-name">HF QUÍMICA</span>
               </div>
               <p className="footer-brand-desc">
@@ -940,6 +995,11 @@ function App() {
                   <span>Total estimado</span>
                   <span className="cart-summary-total-price">${cartTotal.toLocaleString('es-AR')}</span>
                 </div>
+
+                <div style={{ margin: '12px 0', padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: '8px', fontSize: '13px', color: 'var(--text-main)' }}>
+                  <strong>Importante:</strong> Para confirmar la compra con transferencia, recordá enviar el comprobante de pago.<br/>
+                  <strong>Alias:</strong> <code style={{ userSelect: 'all', fontWeight: 'bold' }}>hf.quimica.mp</code>
+                </div>
                 
                 <button 
                   className="btn btn-primary" 
@@ -985,6 +1045,16 @@ function App() {
                   </div>
                   <span className="product-volume-badge" style={{ position: 'static' }}>Tamaño: {selectedProduct.volume}</span>
                 </div>
+                {(selectedProduct.stock || 0) <= 0 && (
+                  <div style={{ marginTop: '10px', display: 'inline-block', padding: '4px 10px', backgroundColor: '#ef4444', color: 'white', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold' }}>
+                    Sin stock
+                  </div>
+                )}
+                {(selectedProduct.stock || 0) > 0 && (selectedProduct.stock || 0) <= 5 && (
+                  <div style={{ marginTop: '10px', display: 'inline-block', padding: '4px 10px', backgroundColor: '#f59e0b', color: 'white', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold' }}>
+                    Poco stock
+                  </div>
+                )}
 
                 <div className="detail-price">
                   ${selectedProduct.price.toLocaleString('es-AR')}
@@ -996,10 +1066,11 @@ function App() {
 
                 <button 
                   className="btn btn-primary" 
-                  style={{ width: '100%', justifyContent: 'center', marginTop: 'auto' }}
-                  onClick={() => { addToCart(selectedProduct, 1); setSelectedProduct(null); }}
+                  style={{ width: '100%', justifyContent: 'center', marginTop: 'auto', opacity: (selectedProduct.stock || 0) <= 0 ? 0.5 : 1 }}
+                  onClick={() => { if ((selectedProduct.stock || 0) > 0) { addToCart(selectedProduct, 1); setSelectedProduct(null); } }}
+                  disabled={(selectedProduct.stock || 0) <= 0}
                 >
-                  Agregar al Carrito <Plus size={16} />
+                  {(selectedProduct.stock || 0) <= 0 ? 'Sin stock' : 'Agregar al Carrito'} {(selectedProduct.stock || 0) > 0 && <Plus size={16} />}
                 </button>
               </div>
             </div>
@@ -1037,14 +1108,14 @@ function App() {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label" htmlFor="checkout-phone">WhatsApp de contacto</label>
+                  <label className="form-label" htmlFor="checkout-address">Dirección</label>
                   <input 
-                    type="tel" 
-                    id="checkout-phone" 
-                    name="phone" 
+                    type="text" 
+                    id="checkout-address" 
+                    name="address" 
                     className="form-input" 
-                    placeholder="Ej: 11 5566-7788"
-                    value={checkoutForm.phone}
+                    placeholder="Ej: Av. Rivadavia 1234, CABA"
+                    value={checkoutForm.address}
                     onChange={handleCheckoutChange}
                     required 
                   />
@@ -1075,15 +1146,25 @@ function App() {
                     value={checkoutForm.payment}
                     onChange={handleCheckoutChange}
                   >
-                    <option value="efectivo">Efectivo / Transferencia bancaria</option>
-                    <option value="tarjeta">Tarjeta de Crédito / Débito / MercadoPago</option>
+                    <option value="transferencia">Transferencia bancaria</option>
+                    <option value="efectivo">Efectivo</option>
                   </select>
                 </div>
 
-                <div style={{ marginTop: '24px', padding: '16px', borderRadius: '8px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-muted)', display: 'flex', gap: '10px' }}>
-                  <Info size={20} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-                  <div>
-                    Al dar click, se generará el mensaje en tu WhatsApp. <strong>El pedido solo quedará confirmado una vez enviado el mensaje.</strong>
+                <div style={{ marginTop: '24px', padding: '16px', borderRadius: '8px', backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <Info size={20} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                    <div>
+                      Al dar click, se generará el mensaje en tu WhatsApp. <strong>El pedido solo quedará confirmado una vez enviado el mensaje.</strong>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
+                    <AlertTriangle size={20} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                    <div>
+                      <strong>Importante:</strong> Para confirmar la compra mediante transferencia, enviar el comprobante de pago.
+                      <br />
+                      <strong>Alias:</strong> <code style={{ userSelect: 'all', fontWeight: 'bold' }}>hf.quimica.mp</code>
+                    </div>
                   </div>
                 </div>
 

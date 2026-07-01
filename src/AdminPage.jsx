@@ -44,7 +44,8 @@ const EMPTY_FORM = {
   rating: '5.0',
   badge: '',
   image: '/category_home.jpg',
-  description: ''
+  description: '',
+  stock: '10'
 };
 
 const CATEGORY_LABELS = {
@@ -215,7 +216,8 @@ export default function AdminPage() {
       rating: p.rating?.toString() || '5.0',
       badge: p.badge || '',
       image: p.image || '/category_home.jpg',
-      description: p.description || ''
+      description: p.description || '',
+      stock: p.stock?.toString() || '0'
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -290,7 +292,8 @@ export default function AdminPage() {
         badge: form.badge,
         image: form.image || '/category_home.jpg',
         description: form.description,
-        views: editingProduct?.views || 0 // preserve views
+        views: editingProduct?.views || 0, // preserve views
+        stock: Number(form.stock) || 0
       };
       if (editingProduct) {
         await updateDoc(doc(db, 'productos', editingProduct.id), data);
@@ -346,7 +349,7 @@ export default function AdminPage() {
       <div className="admin-login-screen">
         <div className="admin-login-card">
           <div className="admin-login-logo">
-            <img src="/logo.jpeg" alt="HF Química" />
+            <img src="/favicon.png" alt="HF Química" />
           </div>
           <h1 className="admin-login-title">Gestión Interna</h1>
           <p className="admin-login-subtitle">HF Química — Acceso restringido</p>
@@ -390,7 +393,7 @@ export default function AdminPage() {
       {/* Topbar */}
       <header className="admin-topbar">
         <div className="admin-topbar-brand">
-          <img src="/logo.jpeg" alt="HF Química" className="admin-topbar-logo" />
+          <img src="/favicon.png" alt="HF Química" className="admin-topbar-logo" />
           <div>
             <span className="admin-topbar-title">Panel de Gestión</span>
             <span className="admin-topbar-subtitle">HF Química</span>
@@ -509,16 +512,30 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Etiqueta (Badge)</label>
-                <input
-                  type="text"
-                  name="badge"
-                  className="form-input"
-                  placeholder="Ej: Más Vendido (Opcional)"
-                  value={form.badge}
-                  onChange={handleFormChange}
-                />
+              <div className="admin-form-row">
+                <div className="form-group">
+                  <label className="form-label">Cartel Sup. Izquierdo</label>
+                  <input
+                    type="text"
+                    name="badge"
+                    className="form-input"
+                    placeholder="Ej: 15% OFF, Fórmula Activa, etc."
+                    value={form.badge}
+                    onChange={handleFormChange}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Stock Actual *</label>
+                  <input
+                    type="number"
+                    name="stock"
+                    className="form-input"
+                    placeholder="Ej: 50"
+                    value={form.stock}
+                    onChange={handleFormChange}
+                    required
+                  />
+                </div>
               </div>
 
               <div className="form-group">
@@ -633,6 +650,9 @@ export default function AdminPage() {
                         <span className="admin-cat-pill">{CATEGORY_LABELS[p.category] || p.category}</span>
                         <span>{p.volume}</span>
                         <span className="admin-price">${Number(p.price).toLocaleString('es-AR')}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '2px', color: (p.stock || 0) <= 0 ? '#ef4444' : (p.stock || 0) <= 5 ? '#f59e0b' : 'inherit' }}>
+                          <Package size={11} /> Stock: {p.stock || 0}
+                        </span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
                           <Star size={11} fill="#f59e0b" stroke="none" />{p.rating}
                         </span>
