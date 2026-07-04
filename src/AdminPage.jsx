@@ -430,38 +430,39 @@ export default function AdminPage() {
     setForm(EMPTY_FORM);
   };
 
-  // ─── Image Upload ───────────────────────────────────────────────────
+  // ─── Image Upload (ImgBB) ───────────────────────────────────────────
   const onFileChange = async (e) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
-      if (!storage) {
-        Swal.fire('Error', 'Firebase Storage no está inicializado.', 'error');
+      
+      const apiKey = import.meta.env.VITE_IMGBB_API_KEY;
+      if (!apiKey || apiKey === 'pega_tu_api_key_aca') {
+        Swal.fire('Error', 'Falta configurar VITE_IMGBB_API_KEY en el archivo .env', 'error');
+        e.target.value = '';
         return;
       }
       
       setUploadingImage(true);
       try {
-        // Limpiamos el nombre del archivo para evitar caracteres raros
-        const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-        const fileName = `products/${Date.now()}_${cleanName}`;
-        const storageRef = ref(storage, fileName);
+        const formData = new FormData();
+        formData.append('image', file);
         
-        // Envolver la subida en una promesa con timeout
-        const uploadPromise = uploadBytes(storageRef, file);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 15000));
+        const res = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+          method: 'POST',
+          body: formData
+        });
         
-        const uploadTask = await Promise.race([uploadPromise, timeoutPromise]);
-        const downloadURL = await getDownloadURL(uploadTask.ref);
+        const data = await res.json();
         
-        setForm(prev => ({ ...prev, image: downloadURL }));
-        Swal.fire({ icon: 'success', title: 'Imagen subida correctamente', timer: 1500, showConfirmButton: false });
+        if (data.success) {
+          setForm(prev => ({ ...prev, image: data.data.url }));
+          Swal.fire({ icon: 'success', title: 'Imagen subida correctamente', timer: 1500, showConfirmButton: false });
+        } else {
+          throw new Error(data.error?.message || 'Error en ImgBB');
+        }
       } catch (err) {
         console.error(err);
-        if (err.message === "TIMEOUT") {
-          Swal.fire('Error', 'La subida tardó demasiado. Revisá las Reglas de Firebase Storage.', 'error');
-        } else {
-          Swal.fire('Error', 'No se pudo subir la imagen', 'error');
-        }
+        Swal.fire('Error', 'No se pudo subir la imagen a ImgBB', 'error');
       } finally {
         setUploadingImage(false);
       }
@@ -751,17 +752,11 @@ export default function AdminPage() {
                 <div className="form-group">
                   <label className="form-label">Imagen</label>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <input type="text" name="image" className="form-input" placeholder="/category_home.jpg o URL" value={form.image} onChange={handleFormChange} style={{ flex: 1 }} disabled={uploadingImage} />
+                    <input type="text" name="image" className="form-input" placeholder="URL de la imagen" value={form.image} onChange={handleFormChange} style={{ flex: 1 }} disabled={uploadingImage} />
                     <label className="btn btn-secondary" style={{ cursor: uploadingImage ? 'not-allowed' : 'pointer', padding: '0 12px', opacity: uploadingImage ? 0.7 : 1 }}>
                       {uploadingImage ? 'Subiendo...' : <><Upload size={16} /> Subir Foto</>}
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={onFileChange} disabled={uploadingImage} />
                     </label>
-                  </div>
-                  <div className="admin-image-shortcuts">
-                    <span>Accesos rápidos:</span>
-                    <button type="button" onClick={() => setForm(f => ({ ...f, image: '/category_home.jpg' }))}>Hogar / Textil</button>
-                    <button type="button" onClick={() => setForm(f => ({ ...f, image: '/category_pool.jpg' }))}>Piletas</button>
-                    <button type="button" onClick={() => setForm(f => ({ ...f, image: '/category_combos.jpg' }))}>Combos</button>
                   </div>
                   {form.image && <img src={form.image} alt="preview" className="admin-image-preview" onError={e => e.target.style.display = 'none'} />}
                 </div>
