@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import { getAuth } from "firebase/auth";
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -18,15 +19,17 @@ const isFirebaseConfigured = !!(
 
 let db = null;
 let storage = null;
+let auth = null;
 
 if (isFirebaseConfigured) {
   try {
     const app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     storage = getStorage(app);
+    auth = getAuth(app);
   } catch (e) {
     console.error("Error initializing Firebase:", e);
   }
 }
 
-export { db, storage, isFirebaseConfigured };
+export { db, storage, auth, isFirebaseConfigured };

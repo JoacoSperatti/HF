@@ -48,11 +48,20 @@ export function notifyAdminWholesaleRequest(formData) {
 // ─────────────────────────────────────────────────────────────────────────────
 export function openApprovalEmail(account) {
   const subject = `✅ Tu cuenta mayorista fue aprobada — HF Química`;
+  const credBlock = account.generatedPassword
+    ? `\n🔑 TUS DATOS DE ACCESO AL SITIO:\n` +
+      `   Email: ${account.email}\n` +
+      `   Contraseña: ${account.generatedPassword}\n\n` +
+      `Ingresá al sitio, hacé clic en "Mayorista" e iniciá sesión con esos datos.\n` +
+      `Te recomendamos cambiar tu contraseña una vez que ingreses.\n\n`
+    : `\nNuestro equipo te enviará tus datos de acceso a la brevedad.\n\n`;
+
   const body =
     `Hola ${account.contactName},\n\n` +
     `¡Excelentes noticias! 🎉\n\n` +
     `Tu solicitud de cuenta mayorista para ${account.businessName} fue APROBADA por nuestro equipo.\n\n` +
-    `A partir de ahora podés ingresar al sitio y ver los precios especiales mayoristas en cada producto, según la cantidad mínima requerida.\n\n` +
+    credBlock +
+    `A partir de ahora podés ver los precios especiales mayoristas en cada producto, según la cantidad mínima requerida.\n\n` +
     `🌐 Sitio: ${window.location.origin}\n\n` +
     `Si tenés alguna consulta:\n` +
     `📧 ${ADMIN_EMAIL}\n` +

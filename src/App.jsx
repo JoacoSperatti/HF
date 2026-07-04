@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Swal from 'sweetalert2';
-import { db, isFirebaseConfigured } from './firebase';
-import { collection, getDocs, doc, setDoc, increment, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db, auth, isFirebaseConfigured } from './firebase';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { collection, getDocs, doc, setDoc, increment, updateDoc, addDoc, serverTimestamp, query, where } from 'firebase/firestore';
 import {
   notifyAdminWholesaleRequest,
   notifyAdminNewOrder,
@@ -35,7 +36,8 @@ import {
   Building2,
   User,
   LogOut,
-  BadgePercent
+  BadgePercent,
+  Lock
 } from 'lucide-react';
 
 // ─── SVG Icons ────────────────────────────────────────────────────────────────
@@ -73,6 +75,150 @@ function useDarkMode() {
   }, [isDark]);
 
   return [isDark, setIsDark];
+}
+
+// ─── Wholesale Login Modal ─────────────────────────────────────────────────────
+function WholesaleLoginModal({ onClose, onLoginSuccess, onOpenSignup }) {
+  const [tab, setTab] = useState('login'); // 'login' | 'signup'
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const handleLoginChange = (e) => {
+    const { name, value } = e.target;
+    setLoginForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    if (!auth) {
+      Swal.fire('Error', 'Firebase Auth no está configurado.', 'error');
+      return;
+    }
+    setIsLoggingIn(true);
+    try {
+      const cred = await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
+      const user = cred.user;
+      // Buscar datos de la cuenta mayorista en Firestore
+      if (db) {
+        const snap = await getDocs(query(collection(db, 'cuentas_mayoristas'), where('email', '==', user.email)));
+        if (!snap.empty) {
+          const accountData = snap.docs[0].data();
+          if (accountData.status === 'aprobado') {
+            onLoginSuccess({
+              email: user.email,
+              businessName: accountData.businessName,
+              contactName: accountData.contactName,
+              uid: user.uid,
+              accountId: snap.docs[0].id
+            });
+            onClose();
+          } else {
+            await signOut(auth);
+            Swal.fire({
+              icon: 'warning',
+              title: 'Cuenta pendiente',
+              text: 'Tu solicitud de cuenta mayorista todavía no fue aprobada. Te avisamos cuando esté lista.',
+              confirmButtonColor: '#063e7d'
+            });
+          }
+        } else {
+          await signOut(auth);
+          Swal.fire({
+            icon: 'error',
+            title: 'Cuenta no encontrada',
+            text: 'No encontramos una cuenta mayorista asociada a ese email.',
+            confirmButtonColor: '#063e7d'
+          });
+        }
+      }
+    } catch (err) {
+      let msg = 'Error al iniciar sesión.';
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        msg = 'Email o contraseña incorrectos.';
+      } else if (err.code === 'auth/too-many-requests') {
+        msg = 'Demasiados intentos fallidos. Intentá más tarde.';
+      }
+      Swal.fire('Error', msg, 'error');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  return (
+    <div className="wholesale-modal-overlay" onClick={onClose}>
+      <div className="wholesale-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="wholesale-login-title" style={{ maxWidth: '440px' }}>
+        <div className="wholesale-modal-header">
+          <h2 className="wholesale-modal-title" id="wholesale-login-title">
+            🏢 Portal Mayorista
+          </h2>
+          <button onClick={onClose} className="close-btn" aria-label="Cerrar">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="wholesale-modal-body">
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-main)', borderRadius: '10px', padding: '4px', marginBottom: '20px' }}>
+            <button
+              type="button"
+              onClick={() => setTab('login')}
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: '7px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 600, transition: 'all 0.2s',
+                background: tab === 'login' ? 'var(--bg-card)' : 'transparent',
+                color: tab === 'login' ? 'var(--primary)' : 'var(--text-muted)',
+                boxShadow: tab === 'login' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none'
+              }}
+            >
+              <Lock size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+              Iniciar sesión
+            </button>
+            <button
+              type="button"
+              onClick={() => { onClose(); onOpenSignup(); }}
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: '7px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 600, transition: 'all 0.2s',
+                background: 'transparent',
+                color: 'var(--text-muted)'
+              }}
+            >
+              <Building2 size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+              Solicitar cuenta
+            </button>
+          </div>
+
+          {/* Login form */}
+          <form onSubmit={handleLoginSubmit}>
+            <div className="form-group" style={{ marginBottom: '14px' }}>
+              <label className="form-label" htmlFor="wl-email">Email</label>
+              <input
+                type="email" id="wl-email" name="email" className="form-input"
+                placeholder="email@empresa.com"
+                value={loginForm.email} onChange={handleLoginChange} required autoFocus
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: '20px' }}>
+              <label className="form-label" htmlFor="wl-pass">Contraseña</label>
+              <input
+                type="password" id="wl-pass" name="password" className="form-input"
+                placeholder="Contraseña generada por HF Química"
+                value={loginForm.password} onChange={handleLoginChange} required
+              />
+            </div>
+            <button
+              type="submit" className="btn btn-primary"
+              style={{ width: '100%', justifyContent: 'center', padding: '13px' }}
+              disabled={isLoggingIn}
+            >
+              {isLoggingIn ? 'Verificando...' : '🔑 Ingresar como Mayorista'}
+            </button>
+          </form>
+
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '14px' }}>
+            ¿No tenés cuenta? Completá el formulario de solicitud y en 24–48 hs te enviamos tus credenciales de acceso.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Wholesale Account Modal ───────────────────────────────────────────────────
@@ -246,6 +392,7 @@ function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isWholesaleOpen, setIsWholesaleOpen] = useState(false);
+  const [isWholesaleLoginOpen, setIsWholesaleLoginOpen] = useState(false);
 
   // Wholesale user session
   const [wholesaleUser, setWholesaleUser] = useState(() => {
@@ -355,6 +502,26 @@ function App() {
     return null;
   }, [wholesaleUser, productQuantities]);
 
+  const recalculateCartPrices = useCallback((currentCart, user) => {
+    return currentCart.map(item => {
+      const p = { ...item.product };
+      if (user && p.wholesalePrice && p.wholesaleMinQty && item.quantity >= p.wholesaleMinQty) {
+        p.effectivePrice = p.wholesalePrice;
+        p.isWholesale = true;
+      } else {
+        p.effectivePrice = p.price;
+        p.isWholesale = false;
+      }
+      return { ...item, product: p };
+    });
+  }, []);
+
+  // Recalcular carrito si entra/sale un mayorista
+  useEffect(() => {
+    setCart(prev => recalculateCartPrices(prev, wholesaleUser));
+  }, [wholesaleUser, recalculateCartPrices]);
+
+
   // ─── Cart operations ─────────────────────────────────────────────────────────
   const addToCart = (product, quantity = 1) => {
     if (product.stock !== undefined && product.stock <= 0) return;
@@ -400,31 +567,33 @@ function App() {
   };
 
   const updateQuantity = (productId, amount) => {
-    setCart((prevCart) =>
-      prevCart.map((item) => {
+    setCart((prevCart) => {
+      const updated = prevCart.map((item) => {
         if (item.product.id === productId) {
           let newQty = item.quantity + amount;
           if (item.product.stock !== undefined && newQty > item.product.stock) newQty = item.product.stock;
           return newQty > 0 ? { ...item, quantity: newQty } : item;
         }
         return item;
-      })
-    );
+      });
+      return recalculateCartPrices(updated, wholesaleUser);
+    });
   };
 
   const updateCartItemQuantityDirect = (productId, value) => {
     const parsed = parseInt(value, 10);
     if (isNaN(parsed) || parsed < 1) return;
-    setCart((prevCart) =>
-      prevCart.map((item) => {
+    setCart((prevCart) => {
+      const updated = prevCart.map((item) => {
         if (item.product.id === productId) {
           let newQty = parsed;
           if (item.product.stock !== undefined && newQty > item.product.stock) newQty = item.product.stock;
           return { ...item, quantity: newQty };
         }
         return item;
-      })
-    );
+      });
+      return recalculateCartPrices(updated, wholesaleUser);
+    });
   };
 
   const removeFromCart = (productId) => {
@@ -574,7 +743,20 @@ function App() {
   const logoutWholesale = () => {
     setWholesaleUser(null);
     localStorage.removeItem('hf_wholesale_user');
+    if (auth) signOut(auth).catch(() => {});
     Swal.fire({ icon: 'info', title: 'Sesión cerrada', text: 'Ya no estás usando tu cuenta mayorista.', timer: 2000, showConfirmButton: false });
+  };
+
+  const handleWholesaleLogin = (userData) => {
+    setWholesaleUser(userData);
+    localStorage.setItem('hf_wholesale_user', JSON.stringify(userData));
+    Swal.fire({
+      icon: 'success',
+      title: `¡Bienvenido, ${userData.businessName}!`,
+      text: 'Ahora ves los precios especiales mayoristas en cada producto.',
+      timer: 2500,
+      showConfirmButton: false
+    });
   };
 
   // ─── JSX ────────────────────────────────────────────────────────────────────
@@ -654,8 +836,8 @@ function App() {
                   <button
                     className="btn btn-secondary"
                     style={{ fontSize: '12px', padding: '8px 14px', gap: '6px', flexShrink: 0 }}
-                    onClick={() => setIsWholesaleOpen(true)}
-                    aria-label="Crear cuenta mayorista"
+                    onClick={() => setIsWholesaleLoginOpen(true)}
+                    aria-label="Ingresar como mayorista"
                     title="Acceso para revendedores y distribuidores"
                   >
                     <Building2 size={14} />
@@ -1259,7 +1441,16 @@ function App() {
             </div>
           )}
 
-          {/* ─── WHOLESALE MODAL ──────────────────────────────────────────── */}
+          {/* ─── WHOLESALE LOGIN MODAL ────────────────────────────────────── */}
+          {isWholesaleLoginOpen && (
+            <WholesaleLoginModal
+              onClose={() => setIsWholesaleLoginOpen(false)}
+              onLoginSuccess={handleWholesaleLogin}
+              onOpenSignup={() => setIsWholesaleOpen(true)}
+            />
+          )}
+
+          {/* ─── WHOLESALE SIGNUP MODAL ───────────────────────────────────── */}
           {isWholesaleOpen && (
             <WholesaleModal onClose={() => setIsWholesaleOpen(false)} onSuccess={handleWholesaleSuccess} />
           )}

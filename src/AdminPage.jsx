@@ -18,7 +18,7 @@ import {
 import { openApprovalEmail, openRejectionEmail } from './emailService';
 import {
   ref,
-  uploadBytesResumable,
+  uploadBytes,
   getDownloadURL
 } from 'firebase/storage';
 import {
@@ -207,10 +207,27 @@ export default function AdminPage() {
     if (!db) return;
     setIsLoadingWholesale(true);
     try {
-      const snap = await getDocs(query(collection(db, 'cuentas_mayoristas'), orderBy('createdAt', 'desc')));
-      setWholesaleAccounts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // Try with ordering first; if the index is missing, fall back to unordered
+      let snap;
+      try {
+        snap = await getDocs(query(collection(db, 'cuentas_mayoristas'), orderBy('createdAt', 'desc')));
+      } catch (indexErr) {
+        console.warn('fetchWholesaleAccounts: orderBy falló (índice faltante?), cargando sin orden:', indexErr);
+        snap = await getDocs(collection(db, 'cuentas_mayoristas'));
+      }
+      const accounts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setWholesaleAccounts(accounts);
+      if (accounts.length === 0) {
+        console.info('cuentas_mayoristas: colección vacía o sin documentos.');
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Error al cargar cuentas mayoristas:', err);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error al cargar mayoristas',
+        html: `<p style="font-size:13px;color:#64748b">${err.message}</p><p style="font-size:12px;margin-top:8px;color:#94a3b8">Revisá las reglas de seguridad de Firestore y que la colección <code>cuentas_mayoristas</code> exista.</p>`,
+        confirmButtonColor: '#063e7d'
+      });
     } finally {
       setIsLoadingWholesale(false);
     }
@@ -285,26 +302,109 @@ export default function AdminPage() {
   };
 
   // ─── Wholesale Account Management ──────────────────────────────────────────
+
+  /** Genera una contraseña aleatoria segura de 12 caracteres */
+  const generatePassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
+    let pass = '';
+    const arr = new Uint8Array(12);
+    crypto.getRandomValues(arr);
+    arr.forEach(b => { pass += chars[b % chars.length]; });
+    return pass;
+  };
+
+  /** Crea un usuario en Firebase Auth via REST API y devuelve el localId o lanza error */
+  const createFirebaseAuthUser = async (email, password) => {
+    const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: false })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const errMsg = data?.error?.message || 'Unknown error';
+      throw new Error(errMsg);
+    }
+    return data.localId;
+  };
+
   const updateWholesaleStatus = async (accountId, newStatus, account) => {
     if (!db) return;
     try {
-      await updateDoc(doc(db, 'cuentas_mayoristas', accountId), { status: newStatus, reviewedAt: serverTimestamp() });
-      setWholesaleAccounts(prev => prev.map(a => a.id === accountId ? { ...a, status: newStatus } : a));
-      
-      // Abrir borrador de mail en el cliente de correo del admin
       if (newStatus === 'aprobado') {
-        openApprovalEmail(account);
-      } else if (newStatus === 'rechazado') {
-        openRejectionEmail(account);
-      }
+        // ── Crear cuenta de login para el mayorista ──────────────────────────
+        const password = generatePassword();
+        let authUid = null;
+        let authError = null;
 
-      const action = newStatus === 'aprobado' ? 'aprobada ✅' : 'rechazada ❌';
-      Swal.fire({
-        icon: newStatus === 'aprobado' ? 'success' : 'info',
-        title: `Cuenta ${action}`,
-        html: `<strong>${account.businessName}</strong><br/><small style="color:#64748b">Contacto: ${account.contactName} — ${account.email}</small><br/><br/><p style="font-size:13px;color:#64748b">✉️ Se abrió un borrador de mail listo para enviar al cliente desde tu Gmail.</p>`,
-        confirmButtonColor: '#063e7d'
-      });
+        try {
+          authUid = await createFirebaseAuthUser(account.email, password);
+        } catch (err) {
+          // EMAIL_EXISTS → ya tiene cuenta, no es fatal
+          if (err.message === 'EMAIL_EXISTS') {
+            authError = 'Ya existía una cuenta con ese email en Firebase Auth.';
+          } else {
+            authError = err.message;
+          }
+        }
+
+        // Guardar en Firestore
+        const updateData = {
+          status: 'aprobado',
+          reviewedAt: serverTimestamp(),
+          ...(authUid ? { authUid, generatedPassword: password, loginCreatedAt: serverTimestamp() } : {})
+        };
+        await updateDoc(doc(db, 'cuentas_mayoristas', accountId), updateData);
+        setWholesaleAccounts(prev => prev.map(a =>
+          a.id === accountId ? { ...a, status: 'aprobado', ...(authUid ? { authUid, generatedPassword: password } : {}) } : a
+        ));
+
+        // Abrir borrador de mail
+        openApprovalEmail({ ...account, generatedPassword: authUid ? password : null });
+
+        if (authUid) {
+          Swal.fire({
+            icon: 'success',
+            title: '✅ Cuenta aprobada',
+            html:
+              `<strong>${account.businessName}</strong><br/>
+               <small style="color:#64748b">Contacto: ${account.contactName} — ${account.email}</small>
+               <hr style="margin:12px 0;border-color:#e2e8f0"/>
+               <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;text-align:left">
+                 <p style="font-weight:700;color:#166534;margin-bottom:6px">🔑 Credenciales de acceso generadas:</p>
+                 <p style="font-size:13px;margin:4px 0"><b>Email:</b> <code style="background:#dcfce7;padding:2px 6px;border-radius:4px">${account.email}</code></p>
+                 <p style="font-size:13px;margin:4px 0"><b>Contraseña:</b> <code style="background:#dcfce7;padding:2px 6px;border-radius:4px;font-size:15px;font-weight:700">${password}</code></p>
+                 <p style="font-size:11px;color:#4ade80;margin-top:8px">✅ Guardada en Firestore. Enviá esta contraseña al mayorista.</p>
+               </div>
+               <p style="font-size:12px;color:#64748b;margin-top:10px">✉️ Se abrió un borrador de mail pre-armado para enviar al cliente.</p>`,
+            confirmButtonColor: '#063e7d',
+            confirmButtonText: 'Entendido'
+          });
+        } else {
+          Swal.fire({
+            icon: 'warning',
+            title: '✅ Cuenta aprobada (sin login)',
+            html:
+              `<strong>${account.businessName}</strong><br/>
+               <p style="font-size:13px;color:#64748b;margin-top:8px">${authError ? `⚠️ No se pudo crear login en Firebase Auth: <b>${authError}</b>` : ''}</p>
+               <p style="font-size:12px;color:#64748b;margin-top:8px">✉️ Se abrió un borrador de mail.</p>`,
+            confirmButtonColor: '#063e7d'
+          });
+        }
+      } else {
+        // rechazado
+        await updateDoc(doc(db, 'cuentas_mayoristas', accountId), { status: newStatus, reviewedAt: serverTimestamp() });
+        setWholesaleAccounts(prev => prev.map(a => a.id === accountId ? { ...a, status: newStatus } : a));
+        openRejectionEmail(account);
+        Swal.fire({
+          icon: 'info',
+          title: 'Cuenta rechazada ❌',
+          html: `<strong>${account.businessName}</strong><br/><small style="color:#64748b">Contacto: ${account.contactName} — ${account.email}</small><br/><br/><p style="font-size:13px;color:#64748b">✉️ Se abrió un borrador de mail listo para enviar al cliente.</p>`,
+          confirmButtonColor: '#063e7d'
+        });
+      }
     } catch (err) {
       console.error(err);
       Swal.fire('Error', 'No se pudo actualizar la cuenta', 'error');
@@ -384,7 +484,8 @@ export default function AdminPage() {
       const croppedImageBlob = await getCroppedImg(imageSrc, croppedAreaPixels);
       const fileName = `products/${Date.now()}_${imageFile.name}`;
       const storageRef = ref(storage, fileName);
-      const uploadTask = await uploadBytesResumable(storageRef, croppedImageBlob);
+      // Use uploadBytes instead of uploadBytesResumable for small blobs (much faster overhead)
+      const uploadTask = await uploadBytes(storageRef, croppedImageBlob);
       const downloadURL = await getDownloadURL(uploadTask.ref);
       setForm(prev => ({ ...prev, image: downloadURL }));
       setShowCropModal(false);
@@ -419,13 +520,14 @@ export default function AdminPage() {
       };
       if (editingProduct) {
         await updateDoc(doc(db, 'productos', editingProduct.id), data);
+        setProducts(prev => prev.map(p => p.id === editingProduct.id ? { id: p.id, ...data } : p));
         Swal.fire({ icon: 'success', title: 'Producto actualizado', timer: 1500, showConfirmButton: false });
       } else {
-        await addDoc(collection(db, 'productos'), data);
+        const docRef = await addDoc(collection(db, 'productos'), data);
+        setProducts(prev => [{ id: docRef.id, ...data }, ...prev]);
         Swal.fire({ icon: 'success', title: 'Producto creado', timer: 1500, showConfirmButton: false });
       }
       cancelEdit();
-      fetchData();
     } catch (err) {
       console.error(err);
       Swal.fire('Error', 'Error al guardar el producto', 'error');
@@ -964,6 +1066,17 @@ export default function AdminPage() {
                       {account.message && (
                         <div style={{ marginTop: '8px', fontSize: '13px', color: 'var(--text-muted)', background: 'var(--bg-card)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', fontStyle: 'italic' }}>
                           "{account.message}"
+                        </div>
+                      )}
+                      {account.status === 'aprobado' && account.generatedPassword && (
+                        <div style={{ marginTop: '10px', background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: '8px', padding: '10px 12px' }}>
+                          <p style={{ fontSize: '11px', fontWeight: 700, color: '#15803d', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            🔑 Credenciales de acceso
+                          </p>
+                          <div style={{ fontSize: '12px', color: 'var(--text-body)', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <span><b>Email:</b> <code style={{ background: '#dcfce7', padding: '1px 5px', borderRadius: '4px' }}>{account.email}</code></span>
+                            <span><b>Contraseña:</b> <code style={{ background: '#dcfce7', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>{account.generatedPassword}</code></span>
+                          </div>
                         </div>
                       )}
                     </div>
