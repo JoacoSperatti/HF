@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
-import Cropper from 'react-easy-crop';
 import { db, storage, isFirebaseConfigured } from './firebase';
 import {
   collection,
@@ -86,29 +85,6 @@ const STATUS_LABELS = {
   cancelado: '❌ Cancelado',
 };
 
-// ─── Image Crop Utilities ─────────────────────────────────────────────────────
-const createImage = (url) =>
-  new Promise((resolve, reject) => {
-    const image = new Image();
-    image.addEventListener('load', () => resolve(image));
-    image.addEventListener('error', (error) => reject(error));
-    image.setAttribute('crossOrigin', 'anonymous');
-    image.src = url;
-  });
-
-const getCroppedImg = async (imageSrc, pixelCrop) => {
-  const image = await createImage(imageSrc);
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  canvas.width = 600;
-  canvas.height = 600;
-  ctx.drawImage(image, pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height, 0, 0, 600, 600);
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), 'image/jpeg');
-  });
-};
-
 // ─── Admin Page ───────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -141,13 +117,7 @@ export default function AdminPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Image Crop
-  const [imageFile, setImageFile] = useState(null);
-  const [imageSrc, setImageSrc] = useState(null);
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
-  const [showCropModal, setShowCropModal] = useState(false);
+  // Image Upload
   const [uploadingImage, setUploadingImage] = useState(false);
 
   // Filters
@@ -184,7 +154,11 @@ export default function AdminPage() {
       if (vSnap.exists()) setTotalVisitors(vSnap.data().count || 0);
     } catch (err) {
       console.error(err);
-      Swal.fire('Error', 'Error al cargar los datos', 'error');
+      if (err.message && err.message.includes("Missing or insufficient permissions")) {
+        Swal.fire('Permisos denegados', 'Firestore bloqueó el acceso. Revisá las Reglas de Firestore en la consola de Firebase.', 'error');
+      } else {
+        Swal.fire('Error de Base de Datos', err.message || 'Error al cargar los datos', 'error');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -454,49 +428,45 @@ export default function AdminPage() {
   const cancelEdit = () => {
     setEditingProduct(null);
     setForm(EMPTY_FORM);
-    setImageSrc(null);
-    setImageFile(null);
   };
 
-  // ─── Image Upload & Crop ───────────────────────────────────────────────────
+  // ─── Image Upload ───────────────────────────────────────────────────
   const onFileChange = async (e) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.addEventListener('load', () => {
-        setImageSrc(reader.result?.toString() || '');
-        setShowCropModal(true);
-      });
-      reader.readAsDataURL(file);
+      if (!storage) {
+        Swal.fire('Error', 'Firebase Storage no está inicializado.', 'error');
+        return;
+      }
+      
+      setUploadingImage(true);
+      try {
+        // Limpiamos el nombre del archivo para evitar caracteres raros
+        const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const fileName = `products/${Date.now()}_${cleanName}`;
+        const storageRef = ref(storage, fileName);
+        
+        // Envolver la subida en una promesa con timeout
+        const uploadPromise = uploadBytes(storageRef, file);
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), 15000));
+        
+        const uploadTask = await Promise.race([uploadPromise, timeoutPromise]);
+        const downloadURL = await getDownloadURL(uploadTask.ref);
+        
+        setForm(prev => ({ ...prev, image: downloadURL }));
+        Swal.fire({ icon: 'success', title: 'Imagen subida correctamente', timer: 1500, showConfirmButton: false });
+      } catch (err) {
+        console.error(err);
+        if (err.message === "TIMEOUT") {
+          Swal.fire('Error', 'La subida tardó demasiado. Revisá las Reglas de Firebase Storage.', 'error');
+        } else {
+          Swal.fire('Error', 'No se pudo subir la imagen', 'error');
+        }
+      } finally {
+        setUploadingImage(false);
+      }
     }
     e.target.value = '';
-  };
-
-  const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
-    setCroppedAreaPixels(croppedAreaPixels);
-  }, []);
-
-  const uploadCroppedImage = async () => {
-    if (!storage || !imageSrc || !croppedAreaPixels) return;
-    setUploadingImage(true);
-    try {
-      const croppedImageBlob = await getCroppedImg(imageSrc, croppedAreaPixels);
-      const fileName = `products/${Date.now()}_${imageFile.name}`;
-      const storageRef = ref(storage, fileName);
-      // Use uploadBytes instead of uploadBytesResumable for small blobs (much faster overhead)
-      const uploadTask = await uploadBytes(storageRef, croppedImageBlob);
-      const downloadURL = await getDownloadURL(uploadTask.ref);
-      setForm(prev => ({ ...prev, image: downloadURL }));
-      setShowCropModal(false);
-      setImageSrc(null);
-      Swal.fire({ icon: 'success', title: 'Imagen recortada y subida', timer: 1500, showConfirmButton: false });
-    } catch (e) {
-      console.error(e);
-      Swal.fire('Error', 'No se pudo subir la imagen', 'error');
-    } finally {
-      setUploadingImage(false);
-    }
   };
 
   const handleSave = async (e) => {
@@ -780,11 +750,11 @@ export default function AdminPage() {
 
                 <div className="form-group">
                   <label className="form-label">Imagen</label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input type="text" name="image" className="form-input" placeholder="/category_home.jpg" value={form.image} onChange={handleFormChange} style={{ flex: 1 }} />
-                    <label className="btn btn-secondary" style={{ cursor: 'pointer', padding: '0 12px' }}>
-                      <Upload size={16} />
-                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={onFileChange} />
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input type="text" name="image" className="form-input" placeholder="/category_home.jpg o URL" value={form.image} onChange={handleFormChange} style={{ flex: 1 }} disabled={uploadingImage} />
+                    <label className="btn btn-secondary" style={{ cursor: uploadingImage ? 'not-allowed' : 'pointer', padding: '0 12px', opacity: uploadingImage ? 0.7 : 1 }}>
+                      {uploadingImage ? 'Subiendo...' : <><Upload size={16} /> Subir Foto</>}
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={onFileChange} disabled={uploadingImage} />
                     </label>
                   </div>
                   <div className="admin-image-shortcuts">
@@ -1243,26 +1213,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ─── CROP MODAL ───────────────────────────────────────────────────── */}
-      {showCropModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ background: 'var(--bg-card)', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>Recortar Imagen (1:1 Recomendado)</h3>
-            <button onClick={() => { setShowCropModal(false); setImageSrc(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-              <X size={20} />
-            </button>
-          </div>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <Cropper image={imageSrc} crop={crop} zoom={zoom} aspect={1} onCropChange={setCrop} onZoomChange={setZoom} onCropComplete={onCropComplete} />
-          </div>
-          <div style={{ background: 'var(--bg-card)', padding: '16px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-            <button onClick={() => { setShowCropModal(false); setImageSrc(null); }} className="btn btn-secondary" disabled={uploadingImage}>Cancelar</button>
-            <button onClick={uploadCroppedImage} className="btn btn-primary" disabled={uploadingImage}>
-              {uploadingImage ? 'Subiendo...' : 'Recortar y Subir'}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* ─── CROP MODAL (REMOVED) ─────────────────────────────────────────── */}
     </div>
   );
 }

@@ -37,8 +37,7 @@ export function notifyAdminWholesaleRequest(formData) {
     `📞 *Teléfono:* ${formData.phone}\n` +
     `🪪 *CUIT:* ${formData.cuit || 'No informado'}\n` +
     `📍 *Provincia:* ${formData.province}\n` +
-    `💬 *Mensaje:* ${formData.message || 'Sin mensaje adicional'}\n\n` +
-    `📋 Revisá y gestioná en el panel:\n${window.location.origin}/gestion-interna`;
+    `💬 *Mensaje:* ${formData.message || 'Sin mensaje adicional'}`;
   openWhatsApp(msg);
 }
 
